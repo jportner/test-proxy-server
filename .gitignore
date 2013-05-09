@@ -1,8 +1,5 @@
 # Java class files
 *.class
-*.jar
-*.war
-*.ear
 
 # generated files
 bin/
