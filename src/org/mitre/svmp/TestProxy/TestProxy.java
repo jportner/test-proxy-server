@@ -20,12 +20,19 @@
  */
 package org.mitre.svmp.TestProxy;
 
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.UnknownHostException;
+import java.security.KeyStore;
+import java.security.SecureRandom;
+
+import javax.net.ServerSocketFactory;
+import javax.net.ssl.KeyManagerFactory;
+import javax.net.ssl.SSLContext;
 
 import org.mitre.svmp.protocol.SVMPProtocol;
 import org.mitre.svmp.protocol.SVMPProtocol.Proxy;
@@ -43,6 +50,13 @@ import com.google.protobuf.TextFormat;
  *
  */
 public class TestProxy {
+
+	// To use SSL:
+	// 1) use keytool to generate a self signed cert in a new keystore
+	// 2) set the keystore file name and password here and set USE_SSL to true
+	private static final boolean USE_SSL = false;
+	private static final String KEYSTORE_FILE = "test.keystore.jks";
+	private static final String KEYSTORE_PASS = "changeme";
 
 	public static String VM_ADDRESS = "192.168.43.100";
 	public static int INPUT_SERVICE_PORT = 8001;
@@ -78,10 +92,10 @@ public class TestProxy {
 	 * @throws IOException 
 	 * @throws InterruptedException 
 	 */
-	public static void main(String[] args) throws IOException, InterruptedException {
-		ServerSocket daemon = new ServerSocket(LISTEN_PORT);
+	public static void main(String[] args) throws Exception {
+		ServerSocket daemon = getServerSocket().createServerSocket(LISTEN_PORT);
 		System.out.println("Listen socket opened on port " + LISTEN_PORT);
-		
+
 		while (true) {
 			TestProxy session = null;
 			try {
@@ -96,7 +110,27 @@ public class TestProxy {
 			}
 		}
 	}
-	
+
+	private static ServerSocketFactory getServerSocket() throws Exception {
+		if (USE_SSL) {
+			FileInputStream keyFile = new FileInputStream(KEYSTORE_FILE);
+			char[] keyPass = KEYSTORE_PASS.toCharArray();
+			KeyStore ks = KeyStore.getInstance(KeyStore.getDefaultType());
+			ks.load(keyFile, keyPass);
+
+			KeyManagerFactory kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
+			kmf.init(ks, keyPass);
+
+			// server authentication only, no client auth here so no TrustManager needed
+			SSLContext sslcontext = SSLContext.getInstance("TLS");
+			sslcontext.init(kmf.getKeyManagers(), null, new SecureRandom());
+
+			return sslcontext.getServerSocketFactory();
+		} else {
+			return ServerSocketFactory.getDefault();
+		}
+	}
+
 	private void run() throws IOException, InterruptedException {
 		InputStream in = session.getInputStream();
 		OutputStream out = session.getOutputStream();
@@ -203,9 +237,11 @@ public class TestProxy {
 	}
 	
 	private boolean doAuthentication(SVMPProtocol.Request r) {
-		if (r.hasAuthentication())
+		if (r.hasAuthentication()) {
+			System.out.println("Got username = '" + r.getAuthentication().getUn() +
+					"' ; password = '" + r.getAuthentication().getPw() + "'");
 			return true;
-		else
+		} else
 			return false;
 	}
 
