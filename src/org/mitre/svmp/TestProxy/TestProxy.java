@@ -55,7 +55,7 @@ public class TestProxy {
 	// To use SSL:
 	// 1) use keytool to generate a self signed cert in a new keystore
 	// 2) set the keystore file name and password here and set USE_SSL to true
-	private static final boolean USE_SSL = false;
+	private static final boolean USE_SSL = true;
 	private static final String KEYSTORE_FILE = "test.keystore.jks";
 	private static final String KEYSTORE_PASS = "changeme";
 
