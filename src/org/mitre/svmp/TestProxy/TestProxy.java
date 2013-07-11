@@ -60,8 +60,6 @@ public class TestProxy {
 	private static final String KEYSTORE_PASS = "changeme";
 
 	public static int INPUT_SERVICE_PORT = 8001;
-	public static int INTENT_SERVICE_PORT = 7777;
-	public static String RTSP_URL = "rtsp://" + VM_ADDRESS + ":5544/rtsp.sdp";
 
 	public static final int LISTEN_PORT = 8002;
 
@@ -149,7 +147,7 @@ public class TestProxy {
 					System.out.println("Waiting for \"VM to start\"");
 					Thread.sleep(2000); // pretend we have to wait a bit for the VM to connect
 					response.setType(ResponseType.VMREADY);
-					response.setMessage(RTSP_URL);
+					response.setMessage(VM_ADDRESS);
 					state = PROXYING;
 					synchronized(out) {
 						response.build().writeDelimitedTo(out);
