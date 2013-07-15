@@ -34,6 +34,7 @@ import javax.net.ServerSocketFactory;
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 
+import com.google.protobuf.InvalidProtocolBufferException;
 import org.mitre.svmp.protocol.SVMPProtocol;
 import org.mitre.svmp.protocol.SVMPProtocol.Request;
 import org.mitre.svmp.protocol.SVMPProtocol.Response;
@@ -127,11 +128,32 @@ public class TestProxy {
 	private void run() throws IOException, InterruptedException {
 		InputStream in = session.getInputStream();
 		OutputStream out = session.getOutputStream();
-		
+
 		System.out.println("Starting listen loop");
-		
-		while (!session.isClosed()) {
-			Request req = Request.parseDelimitedFrom(in);
+
+		while (!session.isClosed() ) {
+
+			// try to parse the Request that is sent from the client
+			Request req = null;
+			try {
+				req = Request.parseDelimitedFrom(in);
+			} catch( InvalidProtocolBufferException e ) {
+				if( e.getMessage().equals("Protocol message contained an invalid tag (zero).") )
+					System.out.println("ERROR: Client tried to connect using SSL, proxy's SSL is turned off");
+				else if( e.getMessage().equals("Remote host closed connection during handshake") )
+					System.out.println("ERROR: Client tried to connect using SSL, proxy's SSL certificate was rejected");
+				else if( e.getMessage().equals("Unrecognized SSL message, plaintext connection?") )
+					System.out.println("ERROR: Client tried to connect without using SSL, proxy's SSL is turned on");
+				else
+					System.out.println("ERROR: failed parsing Request from client: " + e.getMessage());
+				session.close();
+			}
+
+			if( req == null ) {
+				System.out.println("Client disconnected, ending thread");
+				break;
+			}
+
 			//System.out.println("Request received: " + req.getType().name());
 			Response.Builder response = SVMPProtocol.Response.newBuilder();
 			switch (state) {
@@ -212,7 +234,7 @@ public class TestProxy {
 			}
 		}
 	}
-	
+
 	private boolean doAuthentication(SVMPProtocol.Request r) {
 		if (r.hasAuthentication()) {
 			System.out.println("Got username = '" + r.getAuthentication().getUn() +

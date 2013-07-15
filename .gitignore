@@ -5,6 +5,7 @@
 bin/
 dist/
 gen/
+out/
 src/com
 src/org/mitre/svmp/protocol
 
@@ -14,6 +15,10 @@ local.properties
 # Eclipse project files
 .classpath
 .project
+
+# IDEA project files
+*.iml
+.idea/
 
 # Java key stores
 *.jks
