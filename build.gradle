@@ -1,0 +1,12 @@
+apply plugin: 'java'
+group = 'org.mitre.svmp'
+
+dependencies {
+	compile project(':svmp-protocol-def')
+}
+
+jar {
+    from { configurations.compile.collect { it.isDirectory() ? it : zipTree(it) } }
+    manifest { attributes 'Main-Class': 'org.mitre.svmp.TestProxy.TestProxy' }
+}
+
