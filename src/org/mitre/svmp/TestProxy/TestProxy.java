@@ -151,7 +151,9 @@ public class TestProxy {
 
 			if( req == null ) {
 				System.out.println("Client disconnected, ending thread");
-				break;
+				session.close();
+				cleanup();
+				return;
 			}
 
 			//System.out.println("Request received: " + req.getType().name());
