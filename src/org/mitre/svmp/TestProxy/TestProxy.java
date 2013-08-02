@@ -195,21 +195,25 @@ public class TestProxy {
 				switch(req.getType()) {
 				case SCREENINFO:
 					response.clear();
-		        	ScreenInfo.Builder scr = SVMPProtocol.ScreenInfo.newBuilder();
-		        	scr.setX(360);
-		        	scr.setY(480);
-		        	response.setType(ResponseType.SCREENINFO);
-		        	response.setScreenInfo(scr);
-		        	response.build().writeDelimitedTo(out);
-		        	break;
+					ScreenInfo.Builder scr = SVMPProtocol.ScreenInfo.newBuilder();
+					scr.setX(360);
+					scr.setY(480);
+					response.setType(ResponseType.SCREENINFO);
+					response.setScreenInfo(scr);
+					response.build().writeDelimitedTo(out);
+					break;
 				case SENSOREVENT:
 					if (req.hasSensor()) {
-						System.out.println("Sensor type = " + req.getSensor().getType().name());
-						System.out.println("   Accuracy = " + req.getSensor().getAccuracy());
-						System.out.println("   Timestamp = " + req.getSensor().getTimestamp());
-						System.out.print("   Values = [");
+					if (req.hasSensor()) {
+						System.out.print("Sensor type = " + req.getSensor().getType().name());
+						System.out.print(", Accuracy = " + req.getSensor().getAccuracy());
+						System.out.print(", Timestamp = " + req.getSensor().getTimestamp());
+						System.out.print(", Values = [");
+						int ctr = 0;
 						for (float v : req.getSensor().getValuesList()) {
-							System.out.print(" "+v);
+							if( ctr++ > 0 )
+								System.out.print(", ");
+							System.out.print(v);
 						}
 						System.out.println("]");
 					}
@@ -218,13 +222,57 @@ public class TestProxy {
 					if (req.hasTouch()) {
 						System.out.println("Action = " + req.getTouch().getAction());
 						for (SVMPProtocol.TouchEvent.PointerCoords p : req.getTouch().getItemsList()) {
-							System.out.println("    id = " + p.getId() + " ; x = " + p.getX() + " ; y = " + p.getY());
+							System.out.println("	id = " + p.getId() + " ; x = " + p.getX() + " ; y = " + p.getY());
 						}
 					}
 					break;
 				case INTENT:
 					break;
 				case LOCATION:
+					if( req.hasLocationRequest() ) {
+						SVMPProtocol.LocationRequest lr = req.getLocationRequest();
+						SVMPProtocol.LocationRequest.LocationRequestType type = lr.getType();
+						String message = "";
+						switch( type ) {
+							case PROVIDERINFO:
+								SVMPProtocol.LocationProviderInfo lpi = lr.getProviderInfo();
+								message = String.format("Location provider info: [provider '%s', reqNetwork '%b', " +
+										"reqSat '%b', reqCell '%b', hasMonCost '%b', suppAlt '%b', suppSpeed '%b', " +
+										"suppBearing '%b', powerReq '%d', accuracy '%d']",
+										lpi.getProvider(),
+										lpi.getRequiresNetwork(),
+										lpi.getRequiresSatellite(),
+										lpi.getRequiresCell(),
+										lpi.getHasMonetaryCost(),
+										lpi.getSupportsAltitude(),
+										lpi.getSupportsSpeed(),
+										lpi.getSupportsBearing(),
+										lpi.getPowerRequirement(),
+										lpi.getAccuracy() );
+								break;
+							case PROVIDERSTATUS:
+								SVMPProtocol.LocationProviderStatus lps = lr.getProviderStatus();
+								message = String.format("Location provider enabled: [provider '%s', status '%d']",
+										lps.getProvider(),
+										lps.getStatus() );
+								break;
+							case PROVIDERENABLED:
+								SVMPProtocol.LocationProviderEnabled lpe = lr.getProviderEnabled();
+								message = String.format("Location provider enabled: [provider '%s', enabled '%b']",
+										lpe.getProvider(),
+										lpe.getEnabled() );
+								break;
+							case LOCATIONUPDATE:
+								SVMPProtocol.LocationUpdate lu = lr.getUpdate();
+								message = String.format("Location update: [provider '%s', lat '%.2f', lon '%.2f', time '%s']",
+										lu.getProvider(),
+										lu.getLatitude(),
+										lu.getLongitude(),
+										new Date(lu.getTime()).toString() );
+								break;
+						}
+						System.out.println(message);
+					}
 					break;
 				}
 				System.out.println("Request forwarded to input server");
@@ -278,6 +326,30 @@ public class TestProxy {
 				while (true) {
 					Response r = Response.parseDelimitedFrom(fromService);
 					System.out.println("Sending response back to client: " + r.getType().name());
+/*
+// Debug printouts
+					if( r.getType() == ResponseType.LOCATION ) {
+						SVMPProtocol.LocationResponse lr = r.getLocationResponse();
+						String message = "";
+						switch( lr.getType() ) {
+							case SUBSCRIBE:
+								SVMPProtocol.LocationSubscribe ls = lr.getSubscribe();
+								message = String.format("Location subscribe: [type '%s', provider '%s', minTime '%d', "
+										+ "minDist '%.2f']",
+										ls.getType().name(),
+										ls.getProvider(),
+										ls.getMinTime(),
+										ls.getMinDistance() );
+								break;
+							case UNSUBSCRIBE:
+								SVMPProtocol.LocationUnsubscribe lu = lr.getUnsubscribe();
+								message = String.format("Location unsubscribe: [provider '%s']", lu.getProvider() );
+								break;
+						}
+						System.out.println(message);
+					}
+// End debug printouts
+*/
 					synchronized (toClient) {
 						r.writeDelimitedTo(toClient);
 					}
