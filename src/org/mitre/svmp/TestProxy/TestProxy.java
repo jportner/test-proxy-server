@@ -35,11 +35,15 @@ import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 
 import com.google.protobuf.InvalidProtocolBufferException;
+
 import org.mitre.svmp.protocol.SVMPProtocol;
 import org.mitre.svmp.protocol.SVMPProtocol.Request;
+import org.mitre.svmp.protocol.SVMPProtocol.Request.RequestType;
 import org.mitre.svmp.protocol.SVMPProtocol.Response;
+import org.mitre.svmp.protocol.SVMPProtocol.VideoStreamInfo;
 import org.mitre.svmp.protocol.SVMPProtocol.Response.ResponseType;
 import org.mitre.svmp.protocol.SVMPProtocol.ScreenInfo;
+import org.mitre.svmp.protocol.SVMPProtocol.WebRTCMessage;
 
 import com.google.protobuf.ByteString;
 import com.google.protobuf.TextFormat;
@@ -52,11 +56,12 @@ public class TestProxy {
 
 	// Set this to the IP address of the SVMP VM.
 	public static String VM_ADDRESS = "192.168.42.100";
+    //public static String VM_ADDRESS = "127.0.0.1";
 
 	// To use SSL:
 	// 1) use keytool to generate a self signed cert in a new keystore
 	// 2) set the keystore file name and password here and set USE_SSL to true
-	private static final boolean USE_SSL = true;
+	private static final boolean USE_SSL = false;
 	private static final String KEYSTORE_FILE = "test.keystore.jks";
 	private static final String KEYSTORE_PASS = "changeme";
 
@@ -64,16 +69,23 @@ public class TestProxy {
 
 	public static final int LISTEN_PORT = 8002;
 
-	private static final int UNAUTHENTICATED = 0;
-	private static final int AUTHENTICATED = 1;
-	private static final int PROXYING = 2;
+//	private static final int UNAUTHENTICATED = 0;
+//	private static final int AUTHENTICATED = 1;
+//	private static final int PROXYING = 2;
+//	private static final int VIDEOINFO = 3;
+	private enum State {
+	    UNAUTHENTICATED,
+	    AUTHENTICATED,
+        VIDEOINFO,
+	    PROXYING,
+	}
 
 	private Socket inputService = null;
 	private InputStream  inputServiceIn = null;
 	private OutputStream inputServiceOut = null;
 	private Thread inputServiceThread;
 
-	private int state = UNAUTHENTICATED;
+	private State state = State.UNAUTHENTICATED;
 	
 	Socket session;
 	
@@ -156,7 +168,9 @@ public class TestProxy {
 				return;
 			}
 
-			//System.out.println("Request received: " + req.getType().name());
+			System.out.println("Request received: " + req.getType().name());
+			System.out.println("State = " + state.name());
+			
 			Response.Builder response = SVMPProtocol.Response.newBuilder();
 			switch (state) {
 			case UNAUTHENTICATED:
@@ -172,7 +186,7 @@ public class TestProxy {
 					Thread.sleep(2000); // pretend we have to wait a bit for the VM to connect
 					response.setType(ResponseType.VMREADY);
 					response.setMessage(VM_ADDRESS);
-					state = PROXYING;
+                    state = State.VIDEOINFO;
 					synchronized(out) {
 						response.build().writeDelimitedTo(out);
 						System.out.println("VMREADY sent");
@@ -189,9 +203,18 @@ public class TestProxy {
 				break;
 			case AUTHENTICATED:
 				break;
+			case VIDEOINFO:
+			    if (req.getType() == RequestType.VIDEO_PARAMS) {
+			        makeVideoChannelInfo().writeDelimitedTo(out);
+			        state = State.PROXYING;
+			    } else {
+			        // unexpected message type, ignore
+			    }
+			    break;
 			case PROXYING:
-/*
+
 // Debug printouts
+/*
 				switch(req.getType()) {
 				case SCREENINFO:
 					response.clear();
@@ -203,7 +226,6 @@ public class TestProxy {
 					response.build().writeDelimitedTo(out);
 					break;
 				case SENSOREVENT:
-					if (req.hasSensor()) {
 					if (req.hasSensor()) {
 						System.out.print("Sensor type = " + req.getSensor().getType().name());
 						System.out.print(", Accuracy = " + req.getSensor().getAccuracy());
@@ -274,10 +296,14 @@ public class TestProxy {
 						System.out.println(message);
 					}
 					break;
+				case WEBRTC:
+				    System.out.println(req.getWebrtcMsg().getJson());
+				    break;
 				}
 				System.out.println("Request forwarded to input server");
-// End debug printouts
 */
+// End debug printouts
+
 
 				req.writeDelimitedTo(inputServiceOut);
 				break;	// PROXYING state
@@ -303,12 +329,29 @@ public class TestProxy {
 		System.out.println("Input service daemon connected. Starting listen thread.");
 		inputServiceThread.start();
 	}
+	
+	private Response makeVideoChannelInfo() {
+        //final String iceServers = "{ \"iceServers\" : [ { \"url\" : \"stun:128.29.199.74.3478\" } ] }";
+        final String iceServers = "{ \"iceServers\" : [ { \"url\" : \"stun:192.168.42.152:3478\" } ] }";
+	    final String videoConstraints = "{ \"audio\" : true , \"video\" : { \"mandatory\" : {}, \"optional\" : []} }";
+	    final String pcConstraints = "{ \"optional\" : [ { \"DtlsSrtpKeyAgreement\" : true } ] }";
+	    
+	    VideoStreamInfo.Builder vidInfo = VideoStreamInfo.newBuilder();
+	    vidInfo.setIceServers(iceServers);
+	    vidInfo.setPcConstraints(pcConstraints);
+	    vidInfo.setVideoConstraints(videoConstraints);
+	    
+	    return Response.newBuilder()
+	        .setType(ResponseType.VIDSTREAMINFO)
+	        .setVideoInfo(vidInfo)
+	        .build();
+	}
 
 	public void cleanup() throws IOException {
-		inputServiceThread.stop();
-		//intentServiceThread.stop();
-		inputService.close();
-		//intentService.close();
+	    if (inputServiceThread != null)
+	        inputServiceThread.stop();
+	    if (inputService != null)
+	        inputService.close();
 	}
 		
 	private class InputServiceResponseHandler extends Thread {
@@ -347,6 +390,9 @@ public class TestProxy {
 								break;
 						}
 						System.out.println(message);
+					}
+					if (r.getType() == ResponseType.WEBRTC) {
+					    System.out.println(r.getWebrtcMsg().getJson());
 					}
 // End debug printouts
 */
