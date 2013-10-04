@@ -29,6 +29,8 @@ import java.net.Socket;
 import java.net.UnknownHostException;
 import java.security.KeyStore;
 import java.security.SecureRandom;
+import java.util.Date;
+import java.util.List;
 
 import javax.net.ServerSocketFactory;
 import javax.net.ssl.KeyManagerFactory;
@@ -168,8 +170,7 @@ public class TestProxy {
 				return;
 			}
 
-			System.out.println("Request received: " + req.getType().name());
-			System.out.println("State = " + state.name());
+			System.out.println("Request received: " + req.getType().name() + ", State = " + state.name());
 			
 			Response.Builder response = SVMPProtocol.Response.newBuilder();
 			switch (state) {
@@ -296,6 +297,10 @@ public class TestProxy {
 						System.out.println(message);
 					}
 					break;
+                case ROTATION_INFO:
+                    int rotation = req.getRotationInfo().getRotation();
+                    System.out.println("Rotation info: [rotation '" + rotation + "']");
+                    break;
 				case WEBRTC:
 				    System.out.println(req.getWebrtcMsg().getJson());
 				    break;
@@ -313,8 +318,14 @@ public class TestProxy {
 
 	private boolean doAuthentication(SVMPProtocol.Request r) {
 		if (r.hasAuthentication()) {
-			System.out.println("Got username = '" + r.getAuthentication().getUn() +
-					"' ; password = '" + r.getAuthentication().getPw() + "'");
+            StringBuilder stringBuilder = new StringBuilder();
+            stringBuilder.append(String.format("Got auth data: [username '%s'", r.getAuthentication().getUsername()));
+            List<SVMPProtocol.AuthenticationEntry> entryList = r.getAuthentication().getEntriesList();
+            for (SVMPProtocol.AuthenticationEntry entry : entryList)
+                stringBuilder.append(String.format(", %s'...'", entry.getKey()));
+            stringBuilder.append("]");
+
+            System.out.println(stringBuilder.toString());
 			return true;
 		} else
 			return false;
