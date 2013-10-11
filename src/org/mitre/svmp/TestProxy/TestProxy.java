@@ -29,8 +29,6 @@ import java.net.Socket;
 import java.net.UnknownHostException;
 import java.security.KeyStore;
 import java.security.SecureRandom;
-import java.util.Date;
-import java.util.List;
 
 import javax.net.ServerSocketFactory;
 import javax.net.ssl.KeyManagerFactory;
@@ -44,11 +42,6 @@ import org.mitre.svmp.protocol.SVMPProtocol.Request.RequestType;
 import org.mitre.svmp.protocol.SVMPProtocol.Response;
 import org.mitre.svmp.protocol.SVMPProtocol.VideoStreamInfo;
 import org.mitre.svmp.protocol.SVMPProtocol.Response.ResponseType;
-import org.mitre.svmp.protocol.SVMPProtocol.ScreenInfo;
-import org.mitre.svmp.protocol.SVMPProtocol.WebRTCMessage;
-
-import com.google.protobuf.ByteString;
-import com.google.protobuf.TextFormat;
 
 /**
  * @author David Keppler <dkeppler@mitre.org>
@@ -86,9 +79,10 @@ public class TestProxy {
 	private InputStream  inputServiceIn = null;
 	private OutputStream inputServiceOut = null;
 	private Thread inputServiceThread;
+    private boolean sessionTimedOut;
 
 	private State state = State.UNAUTHENTICATED;
-	
+
 	Socket session;
 	
 	public TestProxy(Socket s) {
@@ -104,6 +98,9 @@ public class TestProxy {
 		ServerSocket daemon = getServerSocket().createServerSocket(LISTEN_PORT);
 		System.out.println("Listen socket opened on port " + LISTEN_PORT);
 
+        // we have to start the session handler here to ensure the cleanup timer task will run reliably
+        SessionHandler.init();
+
 		while (true) {
 			TestProxy session = null;
 			try {
@@ -118,6 +115,16 @@ public class TestProxy {
 			}
 		}
 	}
+
+    public boolean isClosed() {
+        return session == null || session.isClosed();
+    }
+
+    // called from SessionInfo when the session has reached its maximum lifespan, triggers a connection termination
+    public void sessionMaxTimeout() throws IOException {
+        sessionTimedOut = true;
+        session.shutdownInput();
+    }
 
 	private static ServerSocketFactory getServerSocket() throws Exception {
 		if (USE_SSL) {
@@ -145,7 +152,7 @@ public class TestProxy {
 
 		System.out.println("Starting listen loop");
 
-		while (!session.isClosed() ) {
+		while (!session.isClosed() && !sessionTimedOut) {
 
 			// try to parse the Request that is sent from the client
 			Request req = null;
@@ -160,12 +167,14 @@ public class TestProxy {
 					System.out.println("ERROR: Client tried to connect without using SSL, proxy's SSL is turned on");
 				else
 					System.out.println("ERROR: failed parsing Request from client: " + e.getMessage());
-				session.close();
 			}
 
 			if( req == null ) {
+                // if the request is null because we are terminating the connection, break out of this loop
+                if (sessionTimedOut)
+                    break;
+
 				System.out.println("Client disconnected, ending thread");
-				session.close();
 				cleanup();
 				return;
 			}
@@ -175,8 +184,13 @@ public class TestProxy {
 			Response.Builder response = SVMPProtocol.Response.newBuilder();
 			switch (state) {
 			case UNAUTHENTICATED:
-				if (doAuthentication(req)) {
+                // try to get a new session token based on the Request; failure results in a null value
+                String newToken = AuthenticationHandler.authenticate(this, req);
+
+				if (newToken != null) {
 					response.setType(ResponseType.AUTHOK);
+                    // set the session token in the message as a JSON object
+                    response.setMessage(String.format("{\"sessionToken\":\"%s\"}", newToken));
 					synchronized(out) {
 						response.build().writeDelimitedTo(out);
 						System.out.println("AUTHOK sent");
@@ -314,21 +328,20 @@ public class TestProxy {
 				break;	// PROXYING state
 			}
 		}
-	}
 
-	private boolean doAuthentication(SVMPProtocol.Request r) {
-		if (r.hasAuthentication()) {
-            StringBuilder stringBuilder = new StringBuilder();
-            stringBuilder.append(String.format("Got auth data: [username '%s'", r.getAuthentication().getUsername()));
-            List<SVMPProtocol.AuthenticationEntry> entryList = r.getAuthentication().getEntriesList();
-            for (SVMPProtocol.AuthenticationEntry entry : entryList)
-                stringBuilder.append(String.format(", %s'...'", entry.getKey()));
-            stringBuilder.append("]");
+        if (sessionTimedOut && !session.isOutputShutdown()) {
+            System.out.println("   Sending re-authenticate message to client...");
+            // send a message to the client notiying them to re-authenticate
+            Response.Builder response = SVMPProtocol.Response.newBuilder();
+            response.setType(ResponseType.ERROR);
+            response.setMessage("{\"type\":\"sessionMaxTimeout\"}");
+            synchronized(out) {
+                response.build().writeDelimitedTo(out);
+            }
 
-            System.out.println(stringBuilder.toString());
-			return true;
-		} else
-			return false;
+            // terminate the proxy connection
+            cleanup();
+        }
 	}
 
 	private void connectToVM(OutputStream client) throws UnknownHostException, IOException {
@@ -359,6 +372,14 @@ public class TestProxy {
 	}
 
 	public void cleanup() throws IOException {
+        // close the connection to the client
+        try {
+            if (session != null && !session.isClosed())
+                session.close();
+        } catch (IOException e) {
+            // do nothing
+        }
+        // close the connection to the VM
 	    if (inputServiceThread != null)
 	        inputServiceThread.stop();
 	    if (inputService != null)
