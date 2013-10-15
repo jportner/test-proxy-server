@@ -30,7 +30,8 @@ import java.util.TimerTask;
  */
 public class SessionInfo implements Comparable<SessionInfo> {
     private static final long SESSION_MAX_TIMEOUT = 4*60*60*1000; // max session lifespan in ms (default: 4 hrs)
-    private static final long SESSION_REUSE_TIMEOUT = 15*60*1000; // max token reuse lifespan in ms (default: 15 min)
+    private static final long SESSION_IDLE_TIMEOUT = 15*60*1000; // idle session lifespan in ms (default: 15 min)
+    private static final long SESSION_REUSE_LIMIT = 15*60*1000; // session reuse limit in ms (default: 15 min)
     private static final long TIMER_UPDATE_INTERVAL = 60*1000; // update interval in ms (default: 60 seconds)
 
     // used to generate random session token strings
@@ -41,6 +42,7 @@ public class SessionInfo implements Comparable<SessionInfo> {
     private String sessionToken;
     private Date firstCreated;
     private Date lastUpdated;
+    private Timer timer;
 
     // if we're creating a brand new SessionInfo, start with a fresh "firstCreated" Date
     public SessionInfo(TestProxy testProxy, String username) {
@@ -58,10 +60,10 @@ public class SessionInfo implements Comparable<SessionInfo> {
         this.username = username;
         this.sessionToken = new BigInteger(130, secureRandom).toString(32); // create a random session token
         this.firstCreated = firstCreated;
-        refreshLastUpdated();
-        // schedule a timer to periodically update the session's 'firstCreated' value, extends session reuse expiration
-        Timer timer = new Timer();
-        timer.scheduleAtFixedRate(new SessionUpdateTask(timer), TIMER_UPDATE_INTERVAL, TIMER_UPDATE_INTERVAL);
+        this.lastUpdated = testProxy.getLastUpdated();
+        // schedule a timer to periodically check if the session has reached a max life timeout or idle timeout
+        timer = new Timer();
+        timer.scheduleAtFixedRate(new SessionUpdateTask(), TIMER_UPDATE_INTERVAL, TIMER_UPDATE_INTERVAL);
     }
 
     public String getSessionToken() {
@@ -73,43 +75,60 @@ public class SessionInfo implements Comparable<SessionInfo> {
         return this.username.equals(username) && !isExpired();
     }
 
+    // a session is expired if either the last update is older than the session reuse limit,
+    // or the first creation date/time is older than the max session lifespan
     public boolean isExpired() {
-        return !lastUpdated.after(new Date(System.currentTimeMillis() - SESSION_REUSE_TIMEOUT));
+        return lastUpdated.before(new Date(System.currentTimeMillis() - SESSION_REUSE_LIMIT))
+                || firstCreated.before(new Date(System.currentTimeMillis() - SESSION_MAX_TIMEOUT));
     }
 
-    // if the maximum session length has not been exceeded, extend the session timeout
-    public boolean update() {
-        System.out.printf("[%s] Updating session '%s' expiration: ",
+    // checks to make sure the max timeout and idle timeout have not been reached
+    public boolean checkTimeouts() {
+        System.out.printf("[%s] Checking session [sessionToken '%s'] timeouts: ",
                 new SimpleDateFormat("HH:mm:ss").format(new Date()), getSessionToken());
-        if (firstCreated.after(new Date(System.currentTimeMillis() - SESSION_MAX_TIMEOUT))) {
-            refreshLastUpdated();
-            System.out.println("success");
-            return true;
+
+        if (firstCreated.before(new Date(System.currentTimeMillis() - SESSION_MAX_TIMEOUT))) {
+            try {
+                System.out.println("max timeout reached, terminating connection...");
+                SessionHandler.removeSession(sessionToken); // remove the session from the treemap
+
+                // send a message to the client notifying them to re-authenticate, and terminate the connection
+                testProxy.sessionMaxTimeout();
+            } catch (IOException e) {
+                System.out.println("   Error: " + e.getMessage());
+            }
+            return false;
+        }
+        else if (lastUpdated.before(new Date(System.currentTimeMillis() - SESSION_IDLE_TIMEOUT))) {
+            try {
+                System.out.println("idle timeout reached, terminating connection...");
+                SessionHandler.removeSession(sessionToken); // remove the session from the treemap
+
+                // send a message to the client notifying them to re-authenticate, and terminate the connection
+                testProxy.sessionIdleTimeout();
+            } catch (IOException e) {
+                System.out.println("   Error: " + e.getMessage());
+            }
+            return false;
         }
 
-        try {
-            System.out.println("max timeout reached, terminating connection...");
-            lastUpdated = new Date(System.currentTimeMillis() - SESSION_REUSE_TIMEOUT); // expire the session
+        System.out.println("session is still valid");
+        return true;
+    }
 
-            // send a message to the client notifying them to re-authenticate, and terminate the connection
-            testProxy.sessionMaxTimeout();
-        } catch (IOException e) {
-            System.out.println("   Error: " + e.getMessage());
-        }
-        return false;
+    // the client closed the connection, refresh the "lastUpdated" time and cancel the update timer
+    public void closeSession() {
+        refreshLastUpdated();
+        timer.cancel();
     }
 
     // sets the "lastUpdated" time to the current time, up to the largest time that will not surpass the max timeout
     private void refreshLastUpdated() {
-        // the largest "lastUpdated" time that will not surpass the max timeout
-        long maxLastUpdated = firstCreated.getTime() + SESSION_MAX_TIMEOUT - SESSION_REUSE_TIMEOUT;
-
-        // if the current time is larger than the largest "lastUpdated" time we will accept...
-        if (System.currentTimeMillis() > maxLastUpdated)
-            this.lastUpdated = new Date(maxLastUpdated);
-            // TODO: some sort of warning to the client that the connection will be terminated soon?
-        else
-            this.lastUpdated = new Date();
+        this.lastUpdated = testProxy.getLastUpdated();
+        System.out.printf("[%s] Refreshing session update time: [sessionToken '%s', lastUpdated '%s']%n",
+                new SimpleDateFormat("HH:mm:ss").format(new Date()),
+                getSessionToken(),
+                new SimpleDateFormat("HH:mm:ss").format(lastUpdated));
     }
 
     // used by SessionHandler cleanup timer, sorts in ascending chronological order
@@ -119,14 +138,11 @@ public class SessionInfo implements Comparable<SessionInfo> {
 
     // this task runs periodically and either extends the expiration time or terminates the connection of the session
     class SessionUpdateTask extends TimerTask {
-        private Timer timer;
-        public SessionUpdateTask(Timer timer) {
-            this.timer = timer;
-        }
         public void run() {
+            refreshLastUpdated();
             // if the test proxy is closed, cancel this TimerTask and future ones (should be done automatically anyways)
-            // if update() failed, we reached the max timeout value; terminate the connection
-            if (testProxy.isClosed() || !update())
+            // if checkTimeouts() failed, we reached the max timeout value; terminate the connection
+            if (testProxy.isClosed() || !checkTimeouts())
                 timer.cancel();
         }
     }

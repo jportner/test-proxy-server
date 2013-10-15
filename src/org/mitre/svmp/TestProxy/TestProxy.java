@@ -29,6 +29,7 @@ import java.net.Socket;
 import java.net.UnknownHostException;
 import java.security.KeyStore;
 import java.security.SecureRandom;
+import java.util.Date;
 
 import javax.net.ServerSocketFactory;
 import javax.net.ssl.KeyManagerFactory;
@@ -50,7 +51,7 @@ import org.mitre.svmp.protocol.SVMPProtocol.Response.ResponseType;
 public class TestProxy {
 
 	// Set this to the IP address of the SVMP VM.
-	public static String VM_ADDRESS = "192.168.42.100";
+	public static String VM_ADDRESS = "192.168.0.222";
     //public static String VM_ADDRESS = "127.0.0.1";
 
 	// To use SSL:
@@ -80,6 +81,8 @@ public class TestProxy {
 	private OutputStream inputServiceOut = null;
 	private Thread inputServiceThread;
     private boolean sessionTimedOut;
+    private String sessionTimedOutMessage;
+    private Date lastUpdated;
 
 	private State state = State.UNAUTHENTICATED;
 
@@ -122,8 +125,24 @@ public class TestProxy {
 
     // called from SessionInfo when the session has reached its maximum lifespan, triggers a connection termination
     public void sessionMaxTimeout() throws IOException {
+        sessionTimedOutMessage = "{'type':'sessionMaxTimeout'}";
+        sessionTimeout();
+    }
+
+    // called from SessionInfo when the session has reached its maximum lifespan, triggers a connection termination
+    public void sessionIdleTimeout() throws IOException {
+        sessionTimedOutMessage = "{'type':'sessionIdleTimeout'}";
+        sessionTimeout();
+    }
+
+    private void sessionTimeout() throws IOException {
         sessionTimedOut = true;
         session.shutdownInput();
+    }
+
+    // the last touch input we have received (used to time out idle sessions)
+    public Date getLastUpdated() {
+        return lastUpdated;
     }
 
 	private static ServerSocketFactory getServerSocket() throws Exception {
@@ -149,6 +168,8 @@ public class TestProxy {
 	private void run() throws IOException, InterruptedException {
 		InputStream in = session.getInputStream();
 		OutputStream out = session.getOutputStream();
+        lastUpdated = new Date();
+        String sessionToken = null;
 
 		System.out.println("Starting listen loop");
 
@@ -174,6 +195,10 @@ public class TestProxy {
                 if (sessionTimedOut)
                     break;
 
+                // the user terminated the connection manually, renew lastUpdated time to extend session reuse limit
+                lastUpdated = new Date();
+                SessionHandler.closeSession(sessionToken);
+
 				System.out.println("Client disconnected, ending thread");
 				cleanup();
 				return;
@@ -185,12 +210,12 @@ public class TestProxy {
 			switch (state) {
 			case UNAUTHENTICATED:
                 // try to get a new session token based on the Request; failure results in a null value
-                String newToken = AuthenticationHandler.authenticate(this, req);
+                sessionToken = AuthenticationHandler.authenticate(this, req);
 
-				if (newToken != null) {
+				if (sessionToken != null) {
 					response.setType(ResponseType.AUTHOK);
                     // set the session token in the message as a JSON object
-                    response.setMessage(String.format("{\"sessionToken\":\"%s\"}", newToken));
+                    response.setMessage(String.format("{\"sessionToken\":\"%s\"}", sessionToken));
 					synchronized(out) {
 						response.build().writeDelimitedTo(out);
 						System.out.println("AUTHOK sent");
@@ -227,7 +252,12 @@ public class TestProxy {
 			    }
 			    break;
 			case PROXYING:
-
+                switch(req.getType()) {
+                    case TOUCHEVENT:
+                        // screen was touched, renew lastUpdated time to extend session idle timeout and reuse limit
+                        lastUpdated = new Date();
+                        break;
+                }
 // Debug printouts
 /*
 				switch(req.getType()) {
@@ -334,7 +364,7 @@ public class TestProxy {
             // send a message to the client notiying them to re-authenticate
             Response.Builder response = SVMPProtocol.Response.newBuilder();
             response.setType(ResponseType.ERROR);
-            response.setMessage("{\"type\":\"sessionMaxTimeout\"}");
+            response.setMessage(sessionTimedOutMessage);
             synchronized(out) {
                 response.build().writeDelimitedTo(out);
             }
@@ -380,8 +410,6 @@ public class TestProxy {
             // do nothing
         }
         // close the connection to the VM
-	    if (inputServiceThread != null)
-	        inputServiceThread.stop();
 	    if (inputService != null)
 	        inputService.close();
 	}
@@ -394,7 +422,7 @@ public class TestProxy {
 			toClient = client;
 			fromService = service;
 		}
-		
+
 		@Override
 		public void run() {
 			try {

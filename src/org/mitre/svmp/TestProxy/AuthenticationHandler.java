@@ -19,6 +19,8 @@ package org.mitre.svmp.TestProxy;
 import org.mitre.svmp.protocol.SVMPProtocol.AuthenticationEntry;
 import org.mitre.svmp.protocol.SVMPProtocol.Request;
 
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 
@@ -33,7 +35,9 @@ public class AuthenticationHandler {
         if (request.hasAuthentication()) {
             try {
                 String username = request.getAuthentication().getUsername();
-                System.out.printf("Got auth data: [username '%s'", username);
+                System.out.printf("[%s] Got auth data: [username '%s'",
+                        new SimpleDateFormat("HH:mm:ss").format(new Date()),
+                        username);
 
                 // try to authenticate from a session token!
                 if (request.getAuthentication().hasSessionToken()) {

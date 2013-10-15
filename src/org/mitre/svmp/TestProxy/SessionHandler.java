@@ -75,17 +75,43 @@ public class SessionHandler {
         }
     }
 
-    // check if a given session token is valid (i.e. has been created, username matches, and has not expired yet)
-    public static boolean isValid(String username, String token) {
-        //init();
-        return instance._isValid(username, token);
+    public static void removeSession(String sessionToken) {
+        instance._removeSession(sessionToken);
     }
 
-    private boolean _isValid(String username, String token) {
+    private void _removeSession(String sessionToken) {
         synchronized (sessionLock) {
-            return token != null
-                    && instance.sessions.containsKey(token)
-                    && instance.sessions.get(token).isValid(username);
+            if (sessionToken != null && instance.sessions.containsKey(sessionToken))
+                instance.sessions.remove(sessionToken);
+        }
+    }
+
+    // called from the proxy when the user closed the connection,
+    // refreshes the "lastUpdated" time and cancel the update timer
+    public static void closeSession(String sessionToken) {
+        instance._closeSession(sessionToken);
+    }
+
+    private void _closeSession(String sessionToken) {
+        synchronized (sessionLock) {
+            if (sessionToken != null && instance.sessions.containsKey(sessionToken))
+                instance.sessions.get(sessionToken).closeSession();
+        }
+    }
+
+    // check if a given session token is valid (i.e. has been created, username matches, and has not expired yet)
+    public static boolean isValid(String username, String sessionToken) {
+        return instance._isValid(username, sessionToken);
+    }
+
+    private boolean _isValid(String username, String sessionToken) {
+        synchronized (sessionLock) {
+            if (sessionToken != null && instance.sessions.containsKey(sessionToken)) {
+                if (instance.sessions.get(sessionToken).isValid(username))
+                    return true;
+                instance.sessions.remove(sessionToken);
+            }
+            return false;
         }
     }
 
