@@ -16,13 +16,11 @@
  */
 package org.mitre.svmp.TestProxy;
 
-import org.mitre.svmp.protocol.SVMPProtocol.AuthenticationEntry;
+import org.mitre.svmp.protocol.SVMPProtocol.AuthRequest;
 import org.mitre.svmp.protocol.SVMPProtocol.Request;
 
 import java.text.SimpleDateFormat;
 import java.util.Date;
-import java.util.HashMap;
-import java.util.List;
 
 /**
  * @author Joe Portner
@@ -32,16 +30,17 @@ public class AuthenticationHandler {
     public static String authenticate(TestProxy testProxy, Request request) {
         String newToken = null;
 
-        if (request.hasAuthentication()) {
+        if (request.hasAuthRequest()) {
             try {
-                String username = request.getAuthentication().getUsername();
+                AuthRequest authRequest = request.getAuthRequest();
+                String username = authRequest.getUsername();
                 System.out.printf("[%s] Got auth data: [username '%s'",
                         new SimpleDateFormat("HH:mm:ss").format(new Date()),
                         username);
 
                 // try to authenticate from a session token!
-                if (request.getAuthentication().hasSessionToken()) {
-                    String oldToken = request.getAuthentication().getSessionToken();
+                if (authRequest.hasSessionToken()) {
+                    String oldToken = authRequest.getSessionToken();
                     System.out.printf(", sessionToken '%s']%n", oldToken);
 
                     // check to make sure that the token is valid (i.e. it is known, and it is not expired)
@@ -52,26 +51,24 @@ public class AuthenticationHandler {
                     else
                         System.out.println("   Session token is not valid and has been rejected");
                 }
-                // we don't have a session token, try to authenticate from the provided AuthenticationEntry collection
+                // we don't have a session token, try to authenticate from the provided information
                 else {
-                    HashMap<String, byte[]> authEntries = new HashMap<String, byte[]>();
-                    StringBuilder stringBuilder = new StringBuilder();
-
-                    // loop through AuthenticationEntry collection, store keys and values in the authEntries HashMap
-                    List<AuthenticationEntry> entryList = request.getAuthentication().getEntriesList();
-                    for (AuthenticationEntry entry : entryList) {
-                        String key = entry.getKey();
-                        byte[] value = entry.getValue().toByteArray();
-
-                        // put authentication key and value into map of entries
-                        authEntries.put(entry.getKey(), entry.getValue().toByteArray());
-
+                    String password = null;
+                    if (authRequest.hasPassword()) {
+                        password = authRequest.getPassword();
                         // debug output
-                        String valueString = new String(value).length() > 0 ? "..." : "";
-                        stringBuilder.append(String.format(", %s '%s'", key, valueString));
+                        System.out.printf(", password '%s'", password.length() > 0 ? "..." : "");
                     }
-                    stringBuilder.append("]");
-                    System.out.println(stringBuilder.toString());
+
+                    String securityToken = null;
+                    if (authRequest.hasSecurityToken()) {
+                        securityToken = authRequest.getSecurityToken();
+                        // debug output
+                        System.out.printf(", securityToken '%s'", securityToken.length() > 0 ? "..." : "");
+                    }
+
+                    // debug output
+                    System.out.println("]");
 
                     // we don't currently authenticate passwords/etc, so if we didn't have a session, make a new one
                     newToken = SessionHandler.newSession(testProxy, username);

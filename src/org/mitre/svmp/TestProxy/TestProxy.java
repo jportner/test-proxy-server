@@ -38,6 +38,8 @@ import javax.net.ssl.SSLContext;
 import com.google.protobuf.InvalidProtocolBufferException;
 
 import org.mitre.svmp.protocol.SVMPProtocol;
+import org.mitre.svmp.protocol.SVMPProtocol.AuthResponse;
+import org.mitre.svmp.protocol.SVMPProtocol.AuthResponse.AuthResponseType;
 import org.mitre.svmp.protocol.SVMPProtocol.Request;
 import org.mitre.svmp.protocol.SVMPProtocol.Request.RequestType;
 import org.mitre.svmp.protocol.SVMPProtocol.Response;
@@ -51,7 +53,7 @@ import org.mitre.svmp.protocol.SVMPProtocol.Response.ResponseType;
 public class TestProxy {
 
 	// Set this to the IP address of the SVMP VM.
-	public static String VM_ADDRESS = "192.168.0.222";
+	public static String VM_ADDRESS = "192.168.42.100";
     //public static String VM_ADDRESS = "127.0.0.1";
 
 	// To use SSL:
@@ -81,7 +83,7 @@ public class TestProxy {
 	private OutputStream inputServiceOut = null;
 	private Thread inputServiceThread;
     private boolean sessionTimedOut;
-    private String sessionTimedOutMessage;
+    private AuthResponseType sessionTimedOutType;
     private Date lastUpdated;
 
 	private State state = State.UNAUTHENTICATED;
@@ -125,13 +127,13 @@ public class TestProxy {
 
     // called from SessionInfo when the session has reached its maximum lifespan, triggers a connection termination
     public void sessionMaxTimeout() throws IOException {
-        sessionTimedOutMessage = "{'type':'sessionMaxTimeout'}";
+        sessionTimedOutType = AuthResponseType.SESSION_MAX_TIMEOUT;
         sessionTimeout();
     }
 
     // called from SessionInfo when the session has reached its maximum lifespan, triggers a connection termination
     public void sessionIdleTimeout() throws IOException {
-        sessionTimedOutMessage = "{'type':'sessionIdleTimeout'}";
+        sessionTimedOutType = AuthResponseType.SESSION_IDLE_TIMEOUT;
         sessionTimeout();
     }
 
@@ -209,16 +211,21 @@ public class TestProxy {
 			Response.Builder response = SVMPProtocol.Response.newBuilder();
 			switch (state) {
 			case UNAUTHENTICATED:
+                response.setType(ResponseType.AUTH);
+                AuthResponse.Builder arBuilder = AuthResponse.newBuilder();
+
                 // try to get a new session token based on the Request; failure results in a null value
                 sessionToken = AuthenticationHandler.authenticate(this, req);
 
+                // if we got a session token, then we authenticated successfully!
 				if (sessionToken != null) {
-					response.setType(ResponseType.AUTHOK);
-                    // set the session token in the message as a JSON object
-                    response.setMessage(String.format("{\"sessionToken\":\"%s\"}", sessionToken));
+                    arBuilder.setType(AuthResponseType.AUTH_OK); // set the AuthResponse type
+                    arBuilder.setSessionToken(sessionToken); // add the session token to the AuthResponse protobuf
+                    response.setAuthResponse(arBuilder); // wrap the AuthResponse in the Response protobuf
+
 					synchronized(out) {
 						response.build().writeDelimitedTo(out);
-						System.out.println("AUTHOK sent");
+						System.out.println("AUTH_OK sent");
 					}
 					connectToVM(out);
 					response.clear();
@@ -232,11 +239,12 @@ public class TestProxy {
 						System.out.println("VMREADY sent");
 					}
 				} else {
-					response.setType(ResponseType.ERROR);
-					response.setMessage("Authentication failed.");
+                    arBuilder.setType(AuthResponseType.AUTH_FAIL); // set the AuthResponse type
+                    response.setAuthResponse(arBuilder); // wrap the AuthResponse in the Response protobuf
+
 					synchronized(out) {
 						response.build().writeDelimitedTo(out);
-						System.out.println("Authentication ERROR sent");
+						System.out.println("AUTH_FAIL sent");
 					}
 					// failed or unexpected message type
 				}
@@ -362,9 +370,12 @@ public class TestProxy {
         if (sessionTimedOut && !session.isOutputShutdown()) {
             System.out.println("   Sending re-authenticate message to client...");
             // send a message to the client notiying them to re-authenticate
-            Response.Builder response = SVMPProtocol.Response.newBuilder();
-            response.setType(ResponseType.ERROR);
-            response.setMessage(sessionTimedOutMessage);
+            AuthResponse.Builder arBuilder = AuthResponse.newBuilder();
+            arBuilder.setType(sessionTimedOutType);
+
+            Response.Builder response = Response.newBuilder();
+            response.setType(ResponseType.AUTH);
+            response.setAuthResponse(arBuilder);
             synchronized(out) {
                 response.build().writeDelimitedTo(out);
             }
