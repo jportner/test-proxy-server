@@ -8,10 +8,12 @@ Building
 ========
 
 Prerequisites:
+
 *  JDK 6 or newer (with 'java' and 'keytool' in your PATH, or at least make sure `JAVA_HOME` is set)
 *  ant
 
 Build Steps:
+
 1. Check out the SVMP client and protocol to a directory of your choice
         cd ${SVMP}
         git clone https://github.com/SVMP/svmp-protocol-def.git -b svmp-1.1
