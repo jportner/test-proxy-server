@@ -3,6 +3,8 @@
 
 # generated files
 bin/
+build/
+.gradle/
 dist/
 gen/
 out/
@@ -15,6 +17,7 @@ local.properties
 # Eclipse project files
 .classpath
 .project
+.settings
 
 # IDEA project files
 *.iml

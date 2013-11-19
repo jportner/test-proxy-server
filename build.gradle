@@ -2,11 +2,20 @@ apply plugin: 'java'
 group = 'org.mitre.svmp'
 
 dependencies {
-	compile project(':svmp-protocol-def')
+    compile project(':svmp-protocol-def')
+    //compile files('../svmp-protocol-def/protobuf-2.5.0/protobuf-java-2.5.0.jar')
+}
+
+sourceSets {
+    main {
+        java {
+            srcDir 'src/'
+//            srcDir '../svmp-protocol-def/src/'
+        }
+    }
 }
 
 jar {
     from { configurations.compile.collect { it.isDirectory() ? it : zipTree(it) } }
     manifest { attributes 'Main-Class': 'org.mitre.svmp.TestProxy.TestProxy' }
 }
-
