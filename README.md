@@ -15,12 +15,14 @@ Prerequisites:
 Build Steps:
 
 1. Check out the SVMP client and protocol to a directory of your choice
+
         cd ${SVMP}
         git clone https://github.com/SVMP/svmp-protocol-def.git -b svmp-1.1
         git clone https://github.com/SVMP/test-proxy-server.git -b svmp-1.1
 2.  Update the VM_ADDRESS, USE_SSL, STUN server and other static variables in 
     TestProxy.java to suit your testing environment.
 3.  Build and run the test proxy:
+
         cd ${SVMP}/test-proxy-server
         ./test-proxy.sh
 
