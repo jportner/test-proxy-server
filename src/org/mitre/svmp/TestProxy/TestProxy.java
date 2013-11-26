@@ -96,7 +96,7 @@ public class TestProxy {
 	
 	/**
 	 * @param args
-	 * @throws IOException 
+	 * @throws IOException
 	 * @throws InterruptedException 
 	 */
 	public static void main(String[] args) throws Exception {
@@ -139,7 +139,21 @@ public class TestProxy {
 
     private void sessionTimeout() throws IOException {
         sessionTimedOut = true;
-        session.shutdownInput();
+
+        System.out.println("   Sending re-authenticate message to client...");
+        // send a message to the client notiying them to re-authenticate
+        AuthResponse.Builder arBuilder = AuthResponse.newBuilder();
+        arBuilder.setType(sessionTimedOutType);
+
+        Response.Builder response = Response.newBuilder();
+        response.setType(ResponseType.AUTH);
+        response.setAuthResponse(arBuilder);
+        synchronized(outLock) {
+            response.build().writeDelimitedTo(session.getOutputStream());
+        }
+
+        // terminate the proxy connection
+        cleanup();
     }
 
     // the last touch input we have received (used to time out idle sessions)
@@ -167,6 +181,7 @@ public class TestProxy {
 		}
 	}
 
+    private final Object outLock = new Object();
 	private void run() throws IOException, InterruptedException {
 		InputStream in = session.getInputStream();
 		OutputStream out = session.getOutputStream();
@@ -188,6 +203,9 @@ public class TestProxy {
 					System.out.println("ERROR: Client tried to connect using SSL, proxy's SSL certificate was rejected");
 				else if( e.getMessage().equals("Unrecognized SSL message, plaintext connection?") )
 					System.out.println("ERROR: Client tried to connect without using SSL, proxy's SSL is turned on");
+                else if (e.getMessage().equals("sun.security.validator.ValidatorException: PKIX path validation failed:"
+                        + " java.security.cert.CertPathValidatorException: signature check failed"))
+                    System.out.println("ERROR: Client certificate authentication failed");
 				else
 					System.out.println("ERROR: failed parsing Request from client: " + e.getMessage());
 			}
@@ -223,7 +241,7 @@ public class TestProxy {
                     arBuilder.setSessionToken(sessionToken); // add the session token to the AuthResponse protobuf
                     response.setAuthResponse(arBuilder); // wrap the AuthResponse in the Response protobuf
 
-					synchronized(out) {
+					synchronized(outLock) {
 						response.build().writeDelimitedTo(out);
 						System.out.println("AUTH_OK sent");
 					}
@@ -234,7 +252,7 @@ public class TestProxy {
 					response.setType(ResponseType.VMREADY);
 					response.setMessage(VM_ADDRESS);
                     state = State.VIDEOINFO;
-					synchronized(out) {
+					synchronized(outLock) {
 						response.build().writeDelimitedTo(out);
 						System.out.println("VMREADY sent");
 					}
@@ -242,7 +260,7 @@ public class TestProxy {
                     arBuilder.setType(AuthResponseType.AUTH_FAIL); // set the AuthResponse type
                     response.setAuthResponse(arBuilder); // wrap the AuthResponse in the Response protobuf
 
-					synchronized(out) {
+					synchronized(outLock) {
 						response.build().writeDelimitedTo(out);
 						System.out.println("AUTH_FAIL sent");
 					}
@@ -366,23 +384,6 @@ public class TestProxy {
 				break;	// PROXYING state
 			}
 		}
-
-        if (sessionTimedOut && !session.isOutputShutdown()) {
-            System.out.println("   Sending re-authenticate message to client...");
-            // send a message to the client notiying them to re-authenticate
-            AuthResponse.Builder arBuilder = AuthResponse.newBuilder();
-            arBuilder.setType(sessionTimedOutType);
-
-            Response.Builder response = Response.newBuilder();
-            response.setType(ResponseType.AUTH);
-            response.setAuthResponse(arBuilder);
-            synchronized(out) {
-                response.build().writeDelimitedTo(out);
-            }
-
-            // terminate the proxy connection
-            cleanup();
-        }
 	}
 
 	private void connectToVM(OutputStream client) throws UnknownHostException, IOException {
@@ -412,7 +413,7 @@ public class TestProxy {
 	        .build();
 	}
 
-	public void cleanup() throws IOException {
+	public void cleanup() {
         // close the connection to the client
         try {
             if (session != null && !session.isClosed())
@@ -421,8 +422,12 @@ public class TestProxy {
             // do nothing
         }
         // close the connection to the VM
-	    if (inputService != null)
-	        inputService.close();
+        try {
+	        if (inputService != null && !inputService.isClosed())
+	            inputService.close();
+        } catch (IOException e) {
+            // do nothing
+        }
 	}
 		
 	private class InputServiceResponseHandler extends Thread {
