@@ -16,11 +16,11 @@
 
   <target name="compile" depends="init"
         description="compile the source " >
-    <javac srcdir="../svmp-protocol-def/src" destdir="${build}">
-      <classpath location="../svmp-protocol-def/protobuf-2.5.0/protobuf-java-2.5.0.jar"/>
+    <javac srcdir="svmp-protocol-def/src" destdir="${build}">
+      <classpath location="svmp-protocol-def/protobuf-2.5.0/protobuf-java-2.5.0.jar"/>
     </javac>
     <javac srcdir="${src}" destdir="${build}">
-      <classpath location="../svmp-protocol-def/protobuf-2.5.0/protobuf-java-2.5.0.jar"/>
+      <classpath location="svmp-protocol-def/protobuf-2.5.0/protobuf-java-2.5.0.jar"/>
     </javac>
   </target>
 

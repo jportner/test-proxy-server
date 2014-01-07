@@ -32,8 +32,7 @@ import java.security.SecureRandom;
 import java.util.Date;
 
 import javax.net.ServerSocketFactory;
-import javax.net.ssl.KeyManagerFactory;
-import javax.net.ssl.SSLContext;
+import javax.net.ssl.*;
 
 import com.google.protobuf.InvalidProtocolBufferException;
 
@@ -64,11 +63,18 @@ public class TestProxy {
 	// public static String STUN_SERVER = "192.168.42.120:3478";
 
 	// To use SSL:
-	// 1) use keytool to generate a self signed cert in a new keystore
+	// 1) use the included "./cert/generate.sh" script to generate server and client certs
 	// 2) set the keystore file name and password here and set USE_SSL to true
-	private static final boolean USE_SSL = false;
-	private static final String KEYSTORE_FILE = "test.keystore.jks";
-	private static final String KEYSTORE_PASS = "changeme";
+    // Also, if you want to use SSL client authentication:
+    // 3) install the generated .p12 file on your ICS+ device using the SVMP test client
+    // 4) set the trust store file name and password here and set USE_SSL_CLIENT_AUTH to true
+    private static final boolean USE_SSL = false;
+    private static final boolean USE_SSL_CLIENT_AUTH = false; // only works if USE_SSL is true
+    private static final String KEY_STORE_FILE = "cert/out/server_kstore.jks";
+    private static final String TRUST_STORE_FILE = "cert/out/server_tstore.jks";
+    private static final String KEY_PASS = "changeme_serverkeypass"; // used for primary key
+    private static final String KEY_STORE_PASS = "changeme_serverstorepass";
+    private static final String TRUST_STORE_PASS = "changeme_serverstorepass";
 
 	public static int INPUT_SERVICE_PORT = 8001;
 
@@ -108,6 +114,13 @@ public class TestProxy {
 	 */
 	public static void main(String[] args) throws Exception {
 		ServerSocket daemon = getServerSocket().createServerSocket(LISTEN_PORT);
+
+        // enables client certificate authentication
+        if (USE_SSL && USE_SSL_CLIENT_AUTH) {
+            System.out.println("Client certificate authentication enabled.");
+            SSLServerSocket ssldaemon = (SSLServerSocket)daemon;
+            ssldaemon.setNeedClientAuth(true);
+        }
 		System.out.println("Listen socket opened on port " + LISTEN_PORT);
 
         // we have to start the session handler here to ensure the cleanup timer task will run reliably
@@ -177,17 +190,27 @@ public class TestProxy {
 
 	private static ServerSocketFactory getServerSocket() throws Exception {
 		if (USE_SSL) {
-			FileInputStream keyFile = new FileInputStream(KEYSTORE_FILE);
-			char[] keyPass = KEYSTORE_PASS.toCharArray();
-			KeyStore ks = KeyStore.getInstance(KeyStore.getDefaultType());
-			ks.load(keyFile, keyPass);
+            char[] keyStorePass = KEY_STORE_PASS.toCharArray();
+            char[] keyPass = KEY_PASS.toCharArray();
+            FileInputStream keyFile = new FileInputStream(KEY_STORE_FILE);
+            KeyStore ks = KeyStore.getInstance(KeyStore.getDefaultType());
+            ks.load(keyFile, keyStorePass);
+            KeyManagerFactory kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
+            kmf.init(ks, keyPass);
 
-			KeyManagerFactory kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
-			kmf.init(ks, keyPass);
+            TrustManager[] trustManagers = null;
+            if (USE_SSL_CLIENT_AUTH) {
+                char[] trustStorePass = KEY_STORE_PASS.toCharArray();
+                FileInputStream trustFile = new FileInputStream(TRUST_STORE_FILE);
+                KeyStore ts = KeyStore.getInstance(KeyStore.getDefaultType());
+                ts.load(trustFile, trustStorePass);
+                TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+                tmf.init(ts);
+                trustManagers = tmf.getTrustManagers();
+            }
 
-			// server authentication only, no client auth here so no TrustManager needed
-			SSLContext sslcontext = SSLContext.getInstance("TLS");
-			sslcontext.init(kmf.getKeyManagers(), null, new SecureRandom());
+            SSLContext sslcontext = SSLContext.getInstance("TLS");
+            sslcontext.init(kmf.getKeyManagers(), trustManagers, new SecureRandom());
 
 			return sslcontext.getServerSocketFactory();
 		} else {
